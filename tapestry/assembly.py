@@ -64,7 +64,7 @@ filenames = {
 
 class Assembly():
 
-    def __init__(self, assemblyfile, readfile, telomeres, outdir, cores, coverage, minreadlength, windowsize, forcereadoutput, mincontigalignment):
+    def __init__(self, assemblyfile, readfile, telomeres, outdir, cores, coverage, minreadlength, windowsize, forcereadoutput, mincontigalignment, read_type='ont', fast_mode=False):
         self.assemblyfile = assemblyfile
         self.readfile = readfile
         self.telomere_seqs = ' '.join(telomeres[0]) if telomeres else ''
@@ -76,6 +76,8 @@ class Assembly():
         self.minreadlength = minreadlength
         self.forcereadoutput = forcereadoutput
         self.min_contig_alignment = mincontigalignment
+        self.read_type = read_type
+        self.fast_mode = fast_mode
 
         setup_output(self.outdir)
         self.filenames = {file_key:f"{self.outdir}/{filenames[file_key]}" for file_key in filenames}
@@ -260,13 +262,26 @@ class Assembly():
             return
 
         if aligntype == 'reads':
-           inputfile = self.filenames['sampled_reads']
-           align = minimap2[f"-xmap-ont", \
+            inputfile = self.filenames['sampled_reads']
+
+            # Select minimap2 preset based on read type
+            preset_map = {
+                'ont': 'map-ont',   # Oxford Nanopore
+                'hifi': 'map-hifi', # PacBio HiFi (CCS)
+                'clr': 'map-pb'     # PacBio CLR
+            }
+            preset = preset_map.get(self.read_type, 'map-ont')
+
+            log.info(f"Using minimap2 preset: {preset} for {self.read_type} reads")
+
+            # Build minimap2 command with selected preset
+            align = minimap2[f"-x{preset}", \
                             "-a", f"-t{self.cores}", self.filenames['assembly'], inputfile]
+
         elif aligntype == 'contigs':
             inputfile = self.filenames['assembly']
             # -m and -s minimap2 options are only loosely related to alignment length,
-            # so use below the true minimum contig alignment threshold; 
+            # so use below the true minimum contig alignment threshold;
             # alignments will be further filtered when loaded into database
             align = minimap2[f"-xasm20", "-D", "-P", \
                              f"-m{self.min_contig_alignment*0.9}", f"-s{self.min_contig_alignment*0.9}", \
@@ -276,7 +291,8 @@ class Assembly():
             sys.exit()
 
         # samtools uses cores-1 because -@ specifies additional cores and defaults to 0
-        align = align | samtools["sort", f"-@{self.cores-1}", f"-o{bam_filename}"]
+        # Add -m option to use more memory for faster sorting (4GB per thread)
+        align = align | samtools["sort", f"-@{self.cores-1}", "-m4G", f"-o{bam_filename}"]
         log.info(f"Aligning {aligntype} {inputfile} to assembly")
 
         try:
@@ -306,7 +322,7 @@ class Assembly():
 
     def load_alignments(self):
         alignments = Alignments(self.filenames['alignments'], self.windowsize)
-        alignments.load(self.filenames['reads_bam'], self.filenames['contigs_bam'], self.contigs, self.readoutput, self.min_contig_alignment)
+        alignments.load(self.filenames['reads_bam'], self.filenames['contigs_bam'], self.contigs, self.readoutput, self.min_contig_alignment, self.fast_mode)
         return alignments
 
 

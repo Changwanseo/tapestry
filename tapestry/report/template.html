@@ -103,7 +103,7 @@ SOFTWARE.
             <a class="nav-link" href="#contigs">Contigs</a>
           </li>
           <li class="nav-item">
-            <a class="nav-link" href="#reads">Reads</a>
+            <a class="nav-link" href="#reads">Coverage</a>
           </li>
           <li class="nav-item">
             <a class="nav-link" href="#information">Information</a>
@@ -149,8 +149,8 @@ SOFTWARE.
     
     <div style="margin-top:20px">
       <h2><a name="contigs">Contigs</a></h2>
-      <p><span style="color:crimson">Red vertical lines</span> at the ends of contigs show telomeres. Opacity of red lines reflects the number of telomere sequences found at each contig end. <span style="color:green">Green blocks</span> show ploidy levels; see <a href="#reads">read alignment plot</a> for key.</p>
-      <p>Click on a table radio button to show <a href="#reads">read alignments</a> for the selected contig.</p>
+      <p><span style="color:crimson">Red vertical lines</span> at the ends of contigs show telomeres. Opacity of red lines reflects the number of telomere sequences found at each contig end. <span style="color:green">Green blocks</span> show ploidy levels; see <a href="#reads">coverage plot</a> for key.</p>
+      <p>Click on a table radio button to show <a href="#reads">read coverage histogram</a> for the selected contig.</p>
       <p>Click on plot contig names to show contig alignments. Hover over <span style="color:blue; opacity:0.3">blue alignment blocks</span> to show connecting alignments. The selected contig is shown with a dashed black line. <span style="color:purple">Purple lines</span> show contigs with alignments to the selected contig. The opacity of each purple line shows the percentage of the selected contig found in the aligned contig. Dark lines suggest the selected contig is mostly contained in the aligned contig.
       <div class="section">
           <div id="contigs_plot"></div>
@@ -172,16 +172,16 @@ SOFTWARE.
     </div>
     <hr/>
     
-    <h2><a name="reads">Read Alignments</a></h2>
+    <h2><a name="reads">Read Coverage</a></h2>
     <div class="section">
       <div id="read_alignment_plot"></div>
       <div id="read_alignment_text" style="margin-left: 20px; margin-top: 65px; width: 550px;">
         <p>The contig selected by radio button in the <a href="#contigs">contig table</a> is shown.</p>
-        <p>Read alignments are shown in <span style="color:blue">blue</span>.</p>
-        <p>Clipped parts of reads with no alignments are shown in <span style="color:wheat">beige</span>.</p>
-        <p>Where parts of reads align elsewhere, lengths of unaligned read sequence connecting to neighbouring alignments are shown for alignments to the <br><span style="color:slategray">same contig</span> or <span style="color:mediumorchid">different contigs</span>.</p>
-        <p>Hover over alignments to show names of connecting contigs (or '-' if none).</p>
-        <p>Alignment opacity shows mapping quality; darker alignments are higher quality.</p>
+        <p>Read coverage is shown as a <span style="color:steelblue">histogram</span> where bar height indicates read depth.</p>
+        <p><span style="color:green">Green horizontal lines</span> show expected ploidy levels (haploid, diploid, etc.).</p>
+        <p><span style="color:black; text-decoration:line-through; text-decoration-style: dashed;">Black dashed vertical lines</span> mark the start and end of the contig.</p>
+        <p>Hover over histogram bars to see the exact coverage depth for that region.</p>
+        <p>This histogram view replaces the previous individual read visualization for improved performance and file size.</p>
       </div>
     </div>
     <hr/>
@@ -491,7 +491,7 @@ function build_reads_plot(read_alignments, dim, max_read_depth, assembly, ploidy
         .attr("x",0 - (reads.dim.height / 2))
         .attr("fill", "black")
         .style("text-anchor", "middle")
-        .text("Reads"); 
+        .text("Read Depth"); 
 
     reads.svg.selectAll("line.ploidy")
         .data(ploidy_depths.filter(d => d.name != "repeat" && d.name != "none"))
@@ -520,16 +520,13 @@ function build_reads_plot(read_alignments, dim, max_read_depth, assembly, ploidy
 
 function plot_read_alignments(alignments, dim, reads, contig, unit) {
 
-    // contig_read_alignments:
-    //  0 read start including left clip
-    //  1 contig alignment start
-    //  2 contig alignment end
-    //  3 read end including right clip
-    //  4 mapping quality
-    //  5 y position on plot
+    // Coverage histogram data format:
+    //  0 bin start position
+    //  1 bin end position
+    //  2 read depth (coverage) in this bin
 
     reads.svg.selectAll("text.xaxislabel").remove()
-    
+
     reads.svg.append("text")
        .attr("class", "xaxislabel")
        .attr("transform", "translate(" + (dim.width/2) + " ," + (reads.dim.height + 45) + ")")
@@ -538,7 +535,7 @@ function plot_read_alignments(alignments, dim, reads, contig, unit) {
        .text(contig + " Position (" + unit + ")");
 
     reads.svg.selectAll("line.contig_boundary").remove()
-       
+
     reads.svg.append("line")
        .attr("class", "contig_boundary")
        .attr("x1", dim.xscale(0) )
@@ -557,62 +554,59 @@ function plot_read_alignments(alignments, dim, reads, contig, unit) {
        .style("stroke-dasharray", "5,5")
        .style("stroke", "black")
 
-    if (alignments === undefined) {
-        reads.svg = reads.svg.append("text")
+    if (alignments === undefined || alignments.length === 0) {
+        reads.svg.append("text")
+            .attr("class", "coverage_message")
             .attr("x", dim.xscale(0))
             .attr("y", reads.dim.yscale.range()[1])
             .style("text-anchor", "start")
             .attr("fill", "black")
-            .text("Read alignments are not available in this report (re-run Tapestry with the -f option to include them).")
+            .text("Coverage data is not available in this report (re-run Tapestry with the -f option to include them).")
         return;
     }
 
-    reads.svg.selectAll("line.read_alignment").remove()
+    // Remove any existing coverage bars
+    reads.svg.selectAll("rect.coverage_bar").remove()
+    reads.svg.selectAll("text.coverage_message").remove()
 
-    var ra = reads.svg.selectAll("line.read_alignment")
+    // Draw histogram bars for coverage
+    reads.svg.selectAll("rect.coverage_bar")
         .data(alignments)
-        .enter();
-    
-    ra.append("line")
-        .attr("class", "read_alignment main")
-        .attr("x1", function(d) { return dim.xscale(d[1]); })
-        .attr("x2", function(d) { return dim.xscale(d[2]); })
-        .attr("y1", function(d) { return reads.dim.yscale(d[5]); })
-        .attr("y2", function(d) { return reads.dim.yscale(d[5]); })
-        .style("stroke-opacity", function(d) { return mq_opacity(d[4]) })
-        .style("stroke", "blue")
-        .on("mouseover", function(d) {
-            contig_text_hover(d[0], d[5], d[6], "end", dim, reads);
-            contig_text_hover(d[3], d[5], d[7], "start", dim, reads);
+        .enter()
+        .append("rect")
+        .attr("class", "coverage_bar")
+        .attr("x", function(d) { return dim.xscale(d[0]); })
+        .attr("y", function(d) { return reads.dim.yscale(d[2]); })
+        .attr("width", function(d) {
+            // Calculate bar width based on bin size
+            var bar_width = dim.xscale(d[1]) - dim.xscale(d[0]);
+            return bar_width > 0 ? bar_width : 1; // Minimum 1px width
         })
-        .on("mouseout", contig_text_unhover);
+        .attr("height", function(d) {
+            return reads.dim.yscale(0) - reads.dim.yscale(d[2]);
+        })
+        .style("fill", "steelblue")
+        .style("fill-opacity", 0.7)
+        .style("stroke", "none")
+        .on("mouseover", function(d) {
+            d3.select(this)
+                .style("fill-opacity", 1.0);
 
-    ra.append("line")
-        .attr("class", "read_alignment clip left")
-        .attr("x1", function(d) { return dim.xscale(d[0]); })
-        .attr("x2", function(d) { return dim.xscale(d[1]); })
-        .attr("y1", function(d) { return reads.dim.yscale(d[5]+0.1); })
-        .attr("y2", function(d) { return reads.dim.yscale(d[5]+0.1); })
-        .style("stroke-opacity", function(d) { return mq_opacity(d[4]); })
-        .style("stroke", function(d) { return clip_colour(d[8]); })
-        .on("mouseover", function(d) {
-            contig_text_hover(d[0], d[5], d[6], "end", dim, reads);
+            // Show tooltip with coverage info
+            reads.svg.append("text")
+                .attr("class", "coverage_tooltip")
+                .attr("x", dim.xscale((d[0] + d[1]) / 2))
+                .attr("y", reads.dim.yscale(d[2]) - 5)
+                .style("text-anchor", "middle")
+                .style("font-size", "12px")
+                .style("fill", "black")
+                .text("Depth: " + d[2].toFixed(1) + "x");
         })
-        .on("mouseout", contig_text_unhover);
-
-    ra.append("line")
-          .attr("class", "read_alignment clip right")
-          .attr("contig_id", function(d) { return d[7]})
-          .attr("x1", function(d) { return dim.xscale(d[2]); })
-          .attr("x2", function(d) { return dim.xscale(d[3]); })
-          .attr("y1", function(d) { return reads.dim.yscale(d[5]+0.1); })
-          .attr("y2", function(d) { return reads.dim.yscale(d[5]+0.1); })
-          .style("stroke-opacity", function(d) { return mq_opacity(d[4]) })
-          .style("stroke", function(d) { return clip_colour(d[9])})
-        .on("mouseover", function(d) {
-            contig_text_hover(d[3], d[5], d[7], "start", dim, reads);
-        })
-        .on("mouseout", contig_text_unhover);
+        .on("mouseout", function(d) {
+            d3.select(this)
+                .style("fill-opacity", 0.7);
+            reads.svg.selectAll("text.coverage_tooltip").remove();
+        });
 
 }
 

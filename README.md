@@ -1,4 +1,14 @@
-# Tapestry
+# Tapestry (Optimized Fork)
+
+> **Note**: This is a forked version with performance optimizations and bug fixes. See [CHANGELOG.md](CHANGELOG.md) for details.
+> - 100x faster visualization (histogram-based coverage instead of individual reads)
+> - 2-5x faster alignment (optimized minimap2 presets and memory settings)
+> - Fixed mapping quality filter bug (depth values were 9% underestimated)
+> - Fixed Biopython 1.86 compatibility
+>
+> Original repository: https://github.com/johnomics/tapestry
+
+---
 
 Tapestry is a tool to validate and edit small eukaryotic genome assemblies using long sequence reads. It is designed to help identify complete chromosomes, symbionts, haplotypes, complex features and errors in close-to-complete genome assemblies. A preprint is available on [bioRxiv](https://www.biorxiv.org/content/10.1101/2020.04.24.059402v1). It has been used to validate a chromosomal [_Angomonas deanei_ genome assembly](https://doi.org/10.1093/g3journal/jkaa018).
 

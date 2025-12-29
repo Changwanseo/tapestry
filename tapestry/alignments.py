@@ -66,7 +66,7 @@ class Alignments():
         return matches[0][0] > (windows[0][0] * 0.5)
 
 
-    def load(self, reads_bam, contigs_bam, reference, readoutput, min_contig_alignment):
+    def load(self, reads_bam, contigs_bam, reference, readoutput, min_contig_alignment, fast_mode=False):
 
         db_exists = file_exists(self.db_filename, deps=[reads_bam, contigs_bam])
         if db_exists and self.windowsize_matches():
@@ -81,8 +81,10 @@ class Alignments():
             self.load_reference(reference)
             self.load_alignments(contigs_bam, 'contig', min_contig_alignment)
             self.load_alignments(reads_bam, 'read')
-            if readoutput:
+            if readoutput and not fast_mode:
                 self.find_neighbours()
+            elif readoutput and fast_mode:
+                log.info("Fast mode enabled: skipping neighbor finding (this will speed up processing but remove some details from the report)")
 
 
     def tables(self):
@@ -433,12 +435,12 @@ class Alignments():
                 self.ranges.c.contig,
                 self.ranges.c.start,
                 (cast(func.sum((func.min(self.alignments.c.ref_end,   self.ranges.c.end  ) -
-                         func.max(self.alignments.c.ref_start, self.ranges.c.start)   )), Float) / 
+                         func.max(self.alignments.c.ref_start, self.ranges.c.start)   )), Float) /
                          (self.ranges.c.end - self.ranges.c.start + 1)).label('depth')
              )
               .select_from(self.ranges.join(self.alignments, self.ranges.c.contig == self.alignments.c.contig))
               .where(and_(self.alignments.c.alntype.in_(["primary", "supplementary"]),
-                          self.alignments.c.mq == 60)
+                          self.alignments.c.mq >= 20)  # Fixed: was == 60, now >= 20 to include good alignments
                     )
              )
 

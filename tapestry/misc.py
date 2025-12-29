@@ -88,7 +88,7 @@ def get_args(arglist=[], description="", scriptargs=[]):
 
 
 def get_weave_args(arglist=[]):
-    args = get_args(arglist, 
+    args = get_args(arglist,
            "weave: assess quality of one genome assembly",
            ["'-a', '--assembly', help='filename of assembly in FASTA format (required)', type=str, required=True",
             "'-r', '--reads', help='filename of long reads in FASTQ format (required; must be gzipped)', type=str, required=True",
@@ -98,7 +98,9 @@ def get_weave_args(arglist=[]):
             "'-w', '--windowsize', help='window size for ploidy calculations (default ~1/30th of contig N50 length, minimum 10000 bp)', type=int",
             "'-f', '--forcereadoutput', help='output read alignments whatever the assembly size (default, only output read alignments for <50 Mb assemblies)', action='store_true'",
             "'-m', '--mincontigalignment', help='minimum length of contig alignment to keep (default 2000 bp)', type=int, default=2000",
-            "'-o', '--output', help='directory to write output, default weave_output', type=str, default='weave_output'"])
+            "'-o', '--output', help='directory to write output, default weave_output', type=str, default='weave_output'",
+            "'--read-type', help='read technology for minimap2 preset: ont (Oxford Nanopore), hifi (PacBio HiFi), clr (PacBio CLR). Default: ont', type=str, default='ont', choices=['ont', 'hifi', 'clr']",
+            "'--fast', help='fast mode: skip neighbor finding for read alignments (faster but less detailed report)', action='store_true'"])
 
     if not file_exists(args.assembly):
         log.error(f"Assembly file {args.assembly} does not exist")
@@ -117,7 +119,7 @@ def get_weave_args(arglist=[]):
 
 def weave_welcome(arglist=[]):
     versions()
-    
+
     print("\nWelcome to Tapestry!\n")
     print(f"Assembly to validate\t{arglist.assembly}")
     print(f"Reads to sample from\t{arglist.reads}")
@@ -132,6 +134,9 @@ def weave_welcome(arglist=[]):
     if arglist.forcereadoutput:
         print(f"Force read output\t{arglist.forcereadoutput}")
     print(f"Minimum contig alignment\t{arglist.mincontigalignment}")
+    print(f"Read type\t{arglist.read_type}")
+    if arglist.fast:
+        print(f"Fast mode\tEnabled (skipping neighbor finding)")
     print(f"Output directory\t{arglist.output}")
     print()
 

@@ -167,10 +167,21 @@ class Contig:
     def num_telomeres(self):
         start_matches = end_matches = 0
         if self.telomeres:
+            from Bio.SeqUtils import nt_search
             for t in self.telomeres:
-                for s in t, t.reverse_complement():
-                    start_matches += len(list(s.instances.search(self.rec[:1000].seq)))
-                    end_matches   += len(list(s.instances.search(self.rec[-1000:].seq)))
+                # Get the consensus sequence from the motif
+                telomere_seq = str(t.consensus)
+                # Also check reverse complement
+                from Bio.Seq import Seq
+                rev_seq = str(Seq(telomere_seq).reverse_complement())
+
+                # Search in start and end regions
+                for seq_to_find in [telomere_seq, rev_seq]:
+                    start_results = nt_search(str(self.rec[:1000].seq), seq_to_find)
+                    end_results = nt_search(str(self.rec[-1000:].seq), seq_to_find)
+                    # nt_search returns [seq, pos1, pos2, ...], so count positions
+                    start_matches += len(start_results) - 1 if len(start_results) > 1 else 0
+                    end_matches += len(end_results) - 1 if len(end_results) > 1 else 0
         return start_matches, end_matches
 
 
@@ -253,51 +264,28 @@ class Contig:
 
 
     def plot_read_alignments(self):
+        """
+        Generate histogram data for read coverage visualization.
+        Returns list of [start, end, depth] for each coverage bin.
+        This replaces the old approach of storing individual read alignments,
+        which was very slow and memory-intensive.
+        """
         read_alignments = []
-        
-        if not self.readoutput or self.alignments.read_alignments(self.name) is None:
+
+        if not self.readoutput or self.read_depths is None:
             return read_alignments
 
-        plot_row_ends = []
+        # Convert read_depths DataFrame to histogram format
+        # read_depths has columns: contig, start, end, depth
+        # Filter for this contig and convert to list of [start, end, depth]
+        contig_depths = self.read_depths[self.read_depths['contig'] == self.name] if 'contig' in self.read_depths.columns else self.read_depths
 
-        for i, a in self.alignments.read_alignments(self.name).iterrows():
-
-            # Only use neighbour distances if contig is the same;
-            # if contigs are different, want to show full clips even if the clip aligns elsewhere
-            start_distance, end_distance = a.left_clip, a.right_clip
-            if a.pre_contig == self.name:
-                start_distance = max(a.pre_distance, 0) # Ignore overlapping alignments with negative distances
-            if a.post_contig == self.name:
-                end_distance = max(a.post_distance, 0)
-            
-            start_position = a.ref_start - start_distance
-            end_position = a.ref_end + end_distance
-
-            assigned_row = None
-            for r, row in enumerate(plot_row_ends):
-                if row < a.ref_start:
-                    assigned_row = r
-                    plot_row_ends[r] = a.ref_end
-                    break
-            if assigned_row is None:
-                assigned_row = len(plot_row_ends)
-                plot_row_ends.append(end_position)
-
-            pre_contig_id, pre_type = self.get_neighbour_details(a.pre_contig)
-            post_contig_id, post_type = self.get_neighbour_details(a.post_contig)
-
-            # int conversion required because Pandas uses numpy int64, which json doesn't understand
-            read_alignments.append([int(x) for x in
-                                [start_position,    # read start including left clip or pre distance
-                                 a.ref_start,       # contig alignment start
-                                 a.ref_end,         # contig alignment end
-                                 end_position,      # read end including right clip or post distance
-                                 a.mq,              # mapping quality
-                                 assigned_row+1,    # y position on plot
-                                 pre_contig_id,
-                                 post_contig_id
-                           ]])
-            read_alignments[-1].append(pre_type)
-            read_alignments[-1].append(post_type)
+        for i, row in contig_depths.iterrows():
+            # Store as [start, end, depth] for histogram visualization
+            read_alignments.append([
+                int(row['start']),
+                int(row['end']),
+                float(row['depth'])
+            ])
 
         return read_alignments
