@@ -20,6 +20,7 @@ setup(
             'jinja2',
             'numpy',
             'pandas',
+            'polars',
             'plumbum',
             'pysam',
             'sqlalchemy>=1.4.0',
