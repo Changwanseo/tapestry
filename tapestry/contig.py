@@ -48,12 +48,13 @@ def get_ploidy(contig, ploidy_depths=None):
 
 class Contig:
 
-    def __init__(self, cid, rec, telomeres, filenames):
+    def __init__(self, cid, rec, telomeres, filenames, precomputed_depths=None):
         self.id = cid
         self.name = rec.id
         self.rec = rec
         self.telomeres = telomeres
         self.filenames = filenames
+        self.precomputed_depths = precomputed_depths  # Dict of pre-computed depths for batch mode
 
 
     def report(self, assembly_gc):
@@ -110,7 +111,15 @@ class Contig:
         self.alignments = Alignments(self.filenames['alignments'], self.windowsize)
 
         self.gc = self.get_gc()
-        self.read_depths = self.alignments.depths('read', self.name)
+
+        # Use pre-computed depths if available (batch mode), otherwise query
+        if self.precomputed_depths and self.name in self.precomputed_depths:
+            self.read_depths = self.precomputed_depths[self.name]
+            # log.info(f"{self.name}: Using pre-computed depths ({len(self.read_depths)} rows)")
+        else:
+            self.read_depths = self.alignments.depths('read', self.name)
+            # log.info(f"{self.name}: Querying depths individually")
+
         self.median_read_depth = self.median_depth(self.read_depths)
         self.contig_alignments, self.contig_coverage = self.get_contig_alignments()
         self.mean_start_overhang, self.mean_end_overhang = self.get_read_overhangs()
