@@ -31,7 +31,6 @@ import os
 import pysam
 import logging as log
 import pandas as pd
-import polars as pl
 
 from collections import namedtuple
 
@@ -517,17 +516,20 @@ class Alignments():
 
         # Combine with ranges table again to fill empty regions
         stmt = (select(
-                    self.ranges.c.contig, 
-                    self.ranges.c.start, 
-                    self.ranges.c.end, 
+                    self.ranges.c.contig,
+                    self.ranges.c.start,
+                    self.ranges.c.end,
                     rdg.c.depth)
                 .select_from(
                     self.ranges.outerjoin(rdg,
                         and_(self.ranges.c.contig == rdg.c.contig,
                              self.ranges.c.start == rdg.c.start)
                 ))
-                .where(self.ranges.c.contig.like(contig_name+"%"))
                )
+
+        # Filter by contig if specified (fix: use == not LIKE to avoid matching contig_1, contig_10, etc)
+        if contig_name:
+            stmt = stmt.where(self.ranges.c.contig == contig_name)
 
         results = self.engine.connect().execute(stmt).fetchall()
         
