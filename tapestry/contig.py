@@ -55,6 +55,8 @@ class Contig:
         self.telomeres = telomeres
         self.filenames = filenames
         self.precomputed_depths = precomputed_depths  # Dict of pre-computed depths for batch mode
+        self.precomputed_contig_alignments = None  # List of pre-computed contig alignments
+        self.precomputed_overhangs = None  # Dict of pre-computed overhangs
 
 
     def report(self, assembly_gc):
@@ -162,10 +164,14 @@ class Contig:
 
 
     def get_read_overhangs(self):
-
-        aligned_length = min(20000, len(self)*0.9)
-        start_overhangs = self.alignments.get_start_overhangs(self.name, 1, min(2000, len(self)), aligned_length)
-        end_overhangs   = self.alignments.get_end_overhangs(self.name, max(len(self)-2000, 1), len(self), aligned_length)
+        # Use pre-computed overhangs if available (batch mode), otherwise query
+        if self.precomputed_overhangs is not None:
+            start_overhangs = self.precomputed_overhangs['start_overhangs']
+            end_overhangs = self.precomputed_overhangs['end_overhangs']
+        else:
+            aligned_length = min(20000, len(self)*0.9)
+            start_overhangs = self.alignments.get_start_overhangs(self.name, 1, min(2000, len(self)), aligned_length)
+            end_overhangs   = self.alignments.get_end_overhangs(self.name, max(len(self)-2000, 1), len(self), aligned_length)
 
         mean_start_overhang = int(mean(start_overhangs)) if start_overhangs else None
         mean_end_overhang   = int(mean(end_overhangs)) if end_overhangs else None
@@ -198,7 +204,14 @@ class Contig:
         alignments = IntervalTree()
         alignments_by_contig = defaultdict(IntervalTree)
         alignments[1:len(self)] = (self.name, 1, len(self))
-        for self_start, self_end, contig, contig_start, contig_end in self.alignments.contig_alignments(self.name):
+
+        # Use pre-computed alignments if available (batch mode), otherwise query
+        if self.precomputed_contig_alignments is not None:
+            contig_aligns = self.precomputed_contig_alignments
+        else:
+            contig_aligns = self.alignments.contig_alignments(self.name)
+
+        for self_start, self_end, contig, contig_start, contig_end in contig_aligns:
             alignments[self_start:self_end+1] = (contig, contig_start, contig_end)
             alignments_by_contig[contig][self_start:self_end+1] = 1
 

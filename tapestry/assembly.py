@@ -329,15 +329,28 @@ class Assembly():
     def process_contigs(self):
         log.info(f"Processing {len(self.contigs)} contigs")
 
-        # Batch-load depths for ALL contigs in single query (10-50x faster!)
-        log.info("Batch loading read depths for all contigs")
+        # Batch-load ALL data upfront to eliminate database lock contention during parallel processing
+        log.info("Batch loading all data for parallel processing")
+
+        # 1. Batch load read depths
         all_depths = self.alignments.depths_batch_all('read')
 
-        # Update each contig with pre-computed depths
+        # 2. Batch load contig alignments
+        all_contig_alignments = self.alignments.contig_alignments_batch_all()
+
+        # 3. Batch load read overhangs (needs contig metadata)
+        contig_metadata = {name: {'length': len(contig)} for name, contig in self.contigs.items()}
+        all_overhangs = self.alignments.read_overhangs_batch_all(contig_metadata)
+
+        # Pass pre-computed data to each contig
         for contig_name, contig in self.contigs.items():
             contig.precomputed_depths = all_depths
+            contig.precomputed_contig_alignments = all_contig_alignments.get(contig_name, [])
+            contig.precomputed_overhangs = all_overhangs.get(contig_name, {'start_overhangs': [], 'end_overhangs': []})
 
-        # Now process contigs in parallel - they'll use pre-computed data
+        log.info("Batch loading complete - starting parallel processing")
+
+        # Now process contigs in parallel - NO database queries during parallel phase!
         with Pool(self.cores) as p:
             for contig in tapestry_tqdm(p.imap(process_contig, self.contigs.values()), total=len(self.contigs), desc="Processing contigs"):
                 self.contigs[contig.name] = contig

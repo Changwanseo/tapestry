@@ -32,7 +32,7 @@ import pysam
 import logging as log
 import pandas as pd
 
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 
 from tqdm import tqdm
 
@@ -641,6 +641,97 @@ class Alignments():
         total_rows = sum(len(df) for df in depths_by_contig.values())
         log.info(f"Loaded depths for {len(depths_by_contig)} contigs ({total_rows} total rows)")
         return depths_by_contig
+
+    def contig_alignments_batch_all(self):
+        """
+        Batch load ALL contig-to-contig alignments at once
+        Returns dict: {contig_name: [(ref_start, ref_end, query, query_start, query_end), ...]}
+        """
+        log.info("Batch loading contig alignments for all contigs")
+
+        stmt = (select(
+                    self.alignments.c.contig,
+                    self.alignments.c.ref_start,
+                    self.alignments.c.ref_end,
+                    self.alignments.c.query,
+                    self.alignments.c.query_start,
+                    self.alignments.c.query_end,
+                )
+                .where(self.alignments.c.querytype == 'contig')
+                .order_by(self.alignments.c.contig, self.alignments.c.ref_start)
+               )
+
+        with self.engine.connect() as conn:
+            results = conn.execute(stmt).fetchall()
+
+        # Group by contig
+        alignments_by_contig = defaultdict(list)
+        for row in results:
+            contig_name = row[0]
+            alignment_data = (row[1], row[2], row[3], row[4], row[5])  # ref_start, ref_end, query, query_start, query_end
+            alignments_by_contig[contig_name].append(alignment_data)
+
+        total_alignments = sum(len(alns) for alns in alignments_by_contig.values())
+        log.info(f"Loaded contig alignments for {len(alignments_by_contig)} contigs ({total_alignments} total alignments)")
+        return dict(alignments_by_contig)
+
+    def read_overhangs_batch_all(self, contig_metadata):
+        """
+        Batch load ALL read overhangs at once
+        contig_metadata: dict {contig_name: {'length': int}}
+        Returns dict: {contig_name: {'start_overhangs': [int, ...], 'end_overhangs': [int, ...]}}
+        """
+        log.info("Batch loading read overhangs for all contigs")
+
+        # Build queries for all contig start and end regions
+        overhangs_by_contig = defaultdict(lambda: {'start_overhangs': [], 'end_overhangs': []})
+
+        # Load all relevant read alignments in one query
+        # We need: contig, ref_start, ref_end, left_clip, right_clip, aligned_length
+        stmt = (select(
+                    self.alignments.c.contig,
+                    self.alignments.c.ref_start,
+                    self.alignments.c.ref_end,
+                    self.alignments.c.left_clip,
+                    self.alignments.c.right_clip,
+                    self.alignments.c.aligned_length
+                )
+                .where(self.alignments.c.querytype == 'read')
+               )
+
+        with self.engine.connect() as conn:
+            results = conn.execute(stmt).fetchall()
+
+        # Process results to compute overhangs for each contig
+        for row in results:
+            contig_name, ref_start, ref_end, left_clip, right_clip, aligned_length = row
+
+            if contig_name not in contig_metadata:
+                continue
+
+            contig_length = contig_metadata[contig_name]['length']
+            aligned_length_threshold = min(20000, contig_length * 0.9)
+
+            if aligned_length <= aligned_length_threshold:
+                continue
+
+            # Check if alignment is in start region (1 to min(2000, length))
+            start_region_end = min(2000, contig_length)
+            if 1 <= ref_start <= start_region_end:
+                overhang = 1 - (ref_start - left_clip)
+                if overhang > 0:
+                    overhangs_by_contig[contig_name]['start_overhangs'].append(overhang)
+
+            # Check if alignment is in end region (max(length-2000, 1) to length)
+            end_region_start = max(contig_length - 2000, 1)
+            if end_region_start <= ref_end <= contig_length:
+                overhang = ref_end + right_clip - contig_length
+                if overhang > 0:
+                    overhangs_by_contig[contig_name]['end_overhangs'].append(overhang)
+
+        total_overhangs = sum(len(oh['start_overhangs']) + len(oh['end_overhangs']) for oh in overhangs_by_contig.values())
+        log.info(f"Loaded overhangs for {len(overhangs_by_contig)} contigs ({total_overhangs} total overhangs)")
+        return dict(overhangs_by_contig)
 
     def read_alignments(self, contig):
         stmt = (select(
