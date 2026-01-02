@@ -352,7 +352,7 @@ class Assembly():
 
         # Now process contigs in parallel - NO database queries during parallel phase!
         with Pool(self.cores) as p:
-            for contig in tapestry_tqdm(p.imap(process_contig, self.contigs.values()), total=len(self.contigs), desc="Processing contigs"):
+            for contig in tapestry_tqdm(p.imap_unordered(process_contig, self.contigs.values()), total=len(self.contigs), desc="Processing contigs"):
                 self.contigs[contig.name] = contig
 
 
@@ -360,7 +360,7 @@ class Assembly():
         log.info(f"Calculating ploidy estimates")
         fit_ploidy = partial(get_ploidy, ploidy_depths=self.ploidy_depths)
         with Pool(self.cores) as p:
-            for contig in tapestry_tqdm(p.imap(fit_ploidy, self.contigs.values()), total=len(self.contigs), desc="Ploidy estimates"):
+            for contig in tapestry_tqdm(p.imap_unordered(fit_ploidy, self.contigs.values()), total=len(self.contigs), desc="Ploidy estimates"):
                 self.contigs[contig.name] = contig
 
 

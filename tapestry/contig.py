@@ -201,8 +201,11 @@ class Contig:
 
 
     def get_contig_alignments(self):
+        """
+        Build alignment interval tree and calculate coverage per contig.
+        Optimized to avoid expensive merge_overlaps() calls using sweep-line algorithm.
+        """
         alignments = IntervalTree()
-        alignments_by_contig = defaultdict(IntervalTree)
         alignments[1:len(self)] = (self.name, 1, len(self))
 
         # Use pre-computed alignments if available (batch mode), otherwise query
@@ -211,25 +214,81 @@ class Contig:
         else:
             contig_aligns = self.alignments.contig_alignments(self.name)
 
+        # Group alignments by target contig for coverage calculation
+        alignments_by_contig = defaultdict(list)
+
         for self_start, self_end, contig, contig_start, contig_end in contig_aligns:
             alignments[self_start:self_end+1] = (contig, contig_start, contig_end)
-            alignments_by_contig[contig][self_start:self_end+1] = 1
+            alignments_by_contig[contig].append((self_start, self_end+1))
 
-        coverage = defaultdict(int)
-        for contig in alignments_by_contig:
-            alignments_by_contig[contig].merge_overlaps()
-            coverage[contig] = sum([i.end-i.begin for i in alignments_by_contig[contig]])
+        # Calculate coverage using sweep-line algorithm instead of merge_overlaps()
+        coverage = {}
+        for contig, intervals in alignments_by_contig.items():
+            if len(intervals) == 0:
+                coverage[contig] = 0
+                continue
+
+            # Sweep-line algorithm to calculate total coverage (merged intervals)
+            events = []
+            for start, end in intervals:
+                events.append((start, 1))
+                events.append((end, -1))
+            events.sort()
+
+            total_coverage = 0
+            depth = 0
+            prev_pos = 0
+
+            for pos, delta in events:
+                if depth > 0:
+                    total_coverage += pos - prev_pos
+                depth += delta
+                prev_pos = pos
+
+            coverage[contig] = total_coverage
 
         return alignments, coverage
 
 
     def get_region_depths(self):
+        """
+        Calculate depth of coverage for each region using efficient sweep-line algorithm.
+        Replaces expensive split_overlaps() + nested interval queries with O(n log n) approach.
+        """
         alignments = self.contig_alignments
-        regions = alignments.copy()
-        regions.split_overlaps()
+
+        if len(alignments) == 0:
+            return []
+
+        # Collect all interval boundaries (starts and ends)
+        events = []
+        for interval in alignments:
+            events.append((interval.begin, 1))   # Start of interval: +1 depth
+            events.append((interval.end, -1))     # End of interval: -1 depth
+
+        # Sort events by position, with ends before starts at same position
+        events.sort(key=lambda x: (x[0], x[1]))
+
+        # Sweep through events to calculate depths
         region_depths = IntervalTree()
-        for region in regions:
-            region_depths[region.begin:region.end] = len(alignments[region.begin:region.end])
+        current_depth = 0
+        region_start = None
+
+        for pos, delta in events:
+            # If depth is changing and we have an active region, save it
+            # Only create intervals with positive length (avoid null intervals)
+            if current_depth > 0 and region_start is not None and region_start < pos:
+                region_depths[region_start:pos] = current_depth
+
+            # Update depth
+            current_depth += delta
+
+            # Start new region if depth > 0
+            if current_depth > 0:
+                region_start = pos
+            else:
+                region_start = None
+
         return sorted(region_depths)
 
 
